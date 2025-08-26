@@ -1,0 +1,14 @@
+{
+  "functions": {
+    "pages/api/collect.js": {
+      "maxDuration": 30
+    }
+  },
+  "env": {
+    "UUID": "@uuid",
+    "MONGODB_URI": "@mongodb_uri",
+    "YANDEX_KEY": "@yandex_key",
+    "NARODMON_UUID": "@narodmon_uuid",
+    "NARODMON_KEY": "@narodmon_key"
+  }
+}
