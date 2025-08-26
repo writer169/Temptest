@@ -22,6 +22,9 @@ export default async function handler(req, res) {
     // Время для прогнозов (+12 часов)
     const forecastTargetTime = new Date(currentHour.getTime() + 12 * 60 * 60 * 1000);
 
+    console.log('Current hour:', currentHour.toISOString());
+    console.log('Forecast target time:', forecastTargetTime.toISOString());
+
     // Получаем реальную температуру из Narodmon
     let actualTemp = null;
     try {
@@ -69,6 +72,8 @@ export default async function handler(req, res) {
           yandexForecast = Number(hourData.temp);
         }
       }
+      
+      console.log('Yandex forecast found:', yandexForecast);
     } catch (error) {
       console.error('Ошибка получения прогноза Yandex:', error);
     }
@@ -80,11 +85,27 @@ export default async function handler(req, res) {
       );
       const meteoData = await meteoResponse.json();
       
-      const targetTimeISO = forecastTargetTime.toISOString().substring(0, 16) + ':00';
-      const timeIndex = meteoData.hourly?.time?.findIndex(time => time === targetTimeISO);
+      console.log('Open-Meteo response timezone:', meteoData.timezone);
+      console.log('Open-Meteo first few times:', meteoData.hourly?.time?.slice(0, 5));
+      
+      // Создаем целевое время в формате Open-Meteo (без секунд)
+      const targetTimeForMeteo = forecastTargetTime.toISOString().substring(0, 13) + ':00'; // YYYY-MM-DDTHH:00
+      console.log('Looking for time:', targetTimeForMeteo);
+      
+      const timeIndex = meteoData.hourly?.time?.findIndex(time => time === targetTimeForMeteo);
+      console.log('Found time index:', timeIndex);
       
       if (timeIndex !== -1 && meteoData.hourly?.temperature_2m?.[timeIndex] !== undefined) {
         meteoForecast = Number(meteoData.hourly.temperature_2m[timeIndex]);
+        console.log('Meteo forecast found:', meteoForecast);
+      } else {
+        console.log('Meteo forecast not found. Available times around target:');
+        if (meteoData.hourly?.time) {
+          const targetIndex = meteoData.hourly.time.findIndex(t => t >= targetTimeForMeteo);
+          const startIdx = Math.max(0, targetIndex - 2);
+          const endIdx = Math.min(meteoData.hourly.time.length, targetIndex + 3);
+          console.log(meteoData.hourly.time.slice(startIdx, endIdx));
+        }
       }
     } catch (error) {
       console.error('Ошибка получения прогноза Open-Meteo:', error);
@@ -103,7 +124,12 @@ export default async function handler(req, res) {
       actual: actualTemp,
       yandex_forecast: yandexForecast,
       meteo_forecast: meteoForecast,
-      target_time: forecastTargetTime.toISOString()
+      target_time: forecastTargetTime.toISOString(),
+      debug: {
+        current_hour: currentHour.toISOString(),
+        forecast_target: forecastTargetTime.toISOString(),
+        target_time_for_meteo: forecastTargetTime.toISOString().substring(0, 13) + ':00'
+      }
     });
 
   } catch (error) {
