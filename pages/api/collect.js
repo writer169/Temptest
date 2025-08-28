@@ -1,139 +1,116 @@
 import { saveTemperatureData } from '../../lib/mongodb';
 
+// Включаем эту опцию, чтобы Vercel использовал более быстрый Edge Runtime, если это возможно.
+// Если у вас есть зависимости, несовместимые с Edge, удалите эту строку.
+export const config = {
+  runtime: 'edge', // или 'nodejs' (по умолчанию)
+};
+
 export default async function handler(req, res) {
-  // Проверка UUID
-  const { uuid } = req.query;
+  // 1. Проверки безопасности и метода запроса
+  const { uuid } from req.query;
   if (!uuid || uuid !== process.env.UUID) {
-    return res.status(403).json({ error: 'Недопустимый UUID' });
+    return new Response(JSON.stringify({ error: 'Недопустимый UUID' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // В Edge Runtime `req.method` находится в объекте `Request`, а не `NextApiRequest`.
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Метод не разрешен' });
+     return new Response(JSON.stringify({ error: 'Метод не разрешен' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
   }
 
   try {
+    // 2. Расчет времени
     const now = new Date();
-    // Текущее время в UTC+5
     const currentTimeUTC5 = new Date(now.getTime() + 5 * 60 * 60 * 1000);
-    // Округляем к текущему часу (XX:00)
     const currentHour = new Date(currentTimeUTC5);
     currentHour.setMinutes(0, 0, 0);
 
-    // Время для прогнозов (+12 часов)
     const forecastTargetTime = new Date(currentHour.getTime() + 12 * 60 * 60 * 1000);
 
-    console.log('Current hour:', currentHour.toISOString());
-    console.log('Forecast target time:', forecastTargetTime.toISOString());
+    // 3. ПАРАЛЛЕЛЬНОЕ ВЫПОЛНЕНИЕ ВСЕХ СЕТЕВЫХ ЗАПРОСОВ
+    // Мы инициируем все запросы одновременно и ждем их завершения.
+    // Это сокращает общее время ожидания с суммы времен всех запросов до времени самого долгого из них.
+    const [
+      narodmonResult,
+      yandexResult,
+      meteoResult
+    ] = await Promise.allSettled([
+      fetch(`https://narodmon.ru/api?cmd=sensorsValues&sensors=37687&uuid=${process.env.NARODMON_UUID}&api_key=${process.env.NARODMON_KEY}`).then(r => r.json()),
+      fetch('https://api.weather.yandex.ru/v2/forecast?lat=43.23&lon=76.86', { headers: { 'X-Yandex-Weather-Key': process.env.YANDEX_KEY } }).then(r => r.json()),
+      fetch('https://api.open-meteo.com/v1/forecast?latitude=43.23&longitude=76.86&timezone=auto&hourly=temperature_2m&models=ecmwf_aifs025_single').then(r => r.json())
+    ]);
 
-    // Получаем реальную температуру из Narodmon
-    let actualTemp = null;
-    try {
-      const narodmonResponse = await fetch(
-        `https://narodmon.ru/api?cmd=sensorsValues&sensors=37687&uuid=${process.env.NARODMON_UUID}&api_key=${process.env.NARODMON_KEY}`
-      );
-      const narodmonData = await narodmonResponse.json();
-      
-      if (narodmonData.sensors && narodmonData.sensors[0] && narodmonData.sensors[0].value !== null) {
-        actualTemp = Number(narodmonData.sensors[0].value);
-      } else {
-        throw new Error('Данные сенсора недоступны');
-      }
-    } catch (error) {
-      console.error('Ошибка получения данных Narodmon:', error);
-      return res.status(500).json({ error: 'Ошибка получения данных сенсора' });
+    // 4. Обработка результатов
+    
+    // Narodmon (критически важный запрос)
+    if (narodmonResult.status === 'rejected' || !narodmonResult.value.sensors?.[0]?.value) {
+      console.error('Ошибка получения данных Narodmon:', narodmonResult.reason || 'Данные сенсора недоступны');
+      throw new Error('Критическая ошибка: не удалось получить данные с сенсора Narodmon.');
     }
-
-    // Сохраняем реальную температуру
-    await saveTemperatureData(currentHour, { actual: actualTemp });
-
-    // Получаем прогнозы
-    let yandexForecast = null;
-    let meteoForecast = null;
-
+    const actualTemp = Number(narodmonResult.value.sensors[0].value);
+    
     // Yandex Weather
-    try {
-      const yandexResponse = await fetch(
-        'https://api.weather.yandex.ru/v2/forecast?lat=43.23&lon=76.86',
-        {
-          headers: {
-            'X-Yandex-Weather-Key': process.env.YANDEX_KEY
-          }
-        }
-      );
-      const yandexData = await yandexResponse.json();
-      
-      const targetDate = forecastTargetTime.toISOString().split('T')[0]; // YYYY-MM-DD
+    let yandexForecast = null;
+    if (yandexResult.status === 'fulfilled') {
+      const yandexData = yandexResult.value;
+      const targetDate = forecastTargetTime.toISOString().split('T')[0];
       const targetHour = forecastTargetTime.getHours();
-      
       const forecast = yandexData.forecasts?.find(f => f.date === targetDate);
-      if (forecast && forecast.hours) {
+      if (forecast?.hours) {
         const hourData = forecast.hours.find(h => parseInt(h.hour) === targetHour);
-        if (hourData && hourData.temp !== undefined) {
+        if (hourData?.temp !== undefined) {
           yandexForecast = Number(hourData.temp);
         }
       }
-      
-      console.log('Yandex forecast found:', yandexForecast);
-    } catch (error) {
-      console.error('Ошибка получения прогноза Yandex:', error);
+    } else {
+      console.error('Ошибка получения прогноза Yandex:', yandexResult.reason);
     }
-
+    
     // Open-Meteo
-    try {
-      const meteoResponse = await fetch(
-        'https://api.open-meteo.com/v1/forecast?latitude=43.23&longitude=76.86&timezone=auto&hourly=temperature_2m&models=ecmwf_aifs025_single'
-      );
-      const meteoData = await meteoResponse.json();
-      
-      console.log('Open-Meteo response timezone:', meteoData.timezone);
-      console.log('Open-Meteo first few times:', meteoData.hourly?.time?.slice(0, 5));
-      
-      // Создаем целевое время в формате Open-Meteo (без секунд)
-      const targetTimeForMeteo = forecastTargetTime.toISOString().substring(0, 13) + ':00'; // YYYY-MM-DDTHH:00
-      console.log('Looking for time:', targetTimeForMeteo);
-      
+    let meteoForecast = null;
+    if (meteoResult.status === 'fulfilled') {
+      const meteoData = meteoResult.value;
+      const targetTimeForMeteo = forecastTargetTime.toISOString().substring(0, 13) + ':00';
       const timeIndex = meteoData.hourly?.time?.findIndex(time => time === targetTimeForMeteo);
-      console.log('Found time index:', timeIndex);
-      
-      if (timeIndex !== -1 && meteoData.hourly?.temperature_2m?.[timeIndex] !== undefined) {
+      if (timeIndex > -1 && meteoData.hourly?.temperature_2m?.[timeIndex] !== undefined) {
         meteoForecast = Number(meteoData.hourly.temperature_2m[timeIndex]);
-        console.log('Meteo forecast found:', meteoForecast);
-      } else {
-        console.log('Meteo forecast not found. Available times around target:');
-        if (meteoData.hourly?.time) {
-          const targetIndex = meteoData.hourly.time.findIndex(t => t >= targetTimeForMeteo);
-          const startIdx = Math.max(0, targetIndex - 2);
-          const endIdx = Math.min(meteoData.hourly.time.length, targetIndex + 3);
-          console.log(meteoData.hourly.time.slice(startIdx, endIdx));
-        }
       }
-    } catch (error) {
-      console.error('Ошибка получения прогноза Open-Meteo:', error);
+    } else {
+      console.error('Ошибка получения прогноза Open-Meteo:', meteoResult.reason);
     }
 
-    // Сохраняем прогнозы
-    if (yandexForecast !== null || meteoForecast !== null) {
-      await saveTemperatureData(forecastTargetTime, {
-        yandex_forecast: yandexForecast,
-        meteo_forecast: meteoForecast
-      });
-    }
+    // 5. ПАРАЛЛЕЛЬНАЯ ЗАПИСЬ В БАЗУ ДАННЫХ
+    // Мы также можем распараллелить запись в БД для дополнительной экономии времени.
+    await Promise.all([
+        saveTemperatureData(currentHour, { actual: actualTemp }),
+        saveTemperatureData(forecastTargetTime, {
+            yandex_forecast: yandexForecast,
+            meteo_forecast: meteoForecast
+        })
+    ]);
 
-    res.status(200).json({ 
-      success: true, 
+    // 6. Отправка успешного ответа
+    const responsePayload = {
+      success: true,
       actual: actualTemp,
       yandex_forecast: yandexForecast,
       meteo_forecast: meteoForecast,
       target_time: forecastTargetTime.toISOString(),
-      debug: {
-        current_hour: currentHour.toISOString(),
-        forecast_target: forecastTargetTime.toISOString(),
-        target_time_for_meteo: forecastTargetTime.toISOString().substring(0, 13) + ':00'
-      }
+    };
+
+    return new Response(JSON.stringify(responsePayload), {
+      status: 200,
+      headers: { 
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache', // Важно, чтобы cron-job всегда вызывал функцию
+       },
     });
 
   } catch (error) {
-    console.error('Ошибка в webhook:', error);
-    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    console.error('Общая ошибка в API-маршруте collect:', error);
+    return new Response(JSON.stringify({ error: 'Внутренняя ошибка сервера' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
