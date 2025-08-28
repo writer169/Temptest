@@ -1,21 +1,17 @@
 import { saveTemperatureData } from '../../lib/mongodb';
 
-// Включаем эту опцию, чтобы Vercel использовал более быстрый Edge Runtime, если это возможно.
-// Если у вас есть зависимости, несовместимые с Edge, удалите эту строку.
-export const config = {
-  runtime: 'edge', // или 'nodejs' (по умолчанию)
-};
+// ВАЖНО: Мы убрали 'export const config = { runtime: 'edge' };'
+// Теперь код будет выполняться в стандартной среде Node.js, где req.query работает.
 
 export default async function handler(req, res) {
   // 1. Проверки безопасности и метода запроса
-  const { uuid } from req.query;
+  const { uuid } = req.query; // Этот синтаксис теперь корректен
   if (!uuid || uuid !== process.env.UUID) {
-    return new Response(JSON.stringify({ error: 'Недопустимый UUID' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    return res.status(403).json({ error: 'Недопустимый UUID' });
   }
 
-  // В Edge Runtime `req.method` находится в объекте `Request`, а не `NextApiRequest`.
   if (req.method !== 'POST') {
-     return new Response(JSON.stringify({ error: 'Метод не разрешен' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
+     return res.status(405).json({ error: 'Метод не разрешен' });
   }
 
   try {
@@ -28,8 +24,6 @@ export default async function handler(req, res) {
     const forecastTargetTime = new Date(currentHour.getTime() + 12 * 60 * 60 * 1000);
 
     // 3. ПАРАЛЛЕЛЬНОЕ ВЫПОЛНЕНИЕ ВСЕХ СЕТЕВЫХ ЗАПРОСОВ
-    // Мы инициируем все запросы одновременно и ждем их завершения.
-    // Это сокращает общее время ожидания с суммы времен всех запросов до времени самого долгого из них.
     const [
       narodmonResult,
       yandexResult,
@@ -80,7 +74,6 @@ export default async function handler(req, res) {
     }
 
     // 5. ПАРАЛЛЕЛЬНАЯ ЗАПИСЬ В БАЗУ ДАННЫХ
-    // Мы также можем распараллелить запись в БД для дополнительной экономии времени.
     await Promise.all([
         saveTemperatureData(currentHour, { actual: actualTemp }),
         saveTemperatureData(forecastTargetTime, {
@@ -90,27 +83,16 @@ export default async function handler(req, res) {
     ]);
 
     // 6. Отправка успешного ответа
-    const responsePayload = {
+    return res.status(200).json({
       success: true,
       actual: actualTemp,
       yandex_forecast: yandexForecast,
       meteo_forecast: meteoForecast,
       target_time: forecastTargetTime.toISOString(),
-    };
-
-    return new Response(JSON.stringify(responsePayload), {
-      status: 200,
-      headers: { 
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-cache', // Важно, чтобы cron-job всегда вызывал функцию
-       },
     });
 
   } catch (error) {
     console.error('Общая ошибка в API-маршруте collect:', error);
-    return new Response(JSON.stringify({ error: 'Внутренняя ошибка сервера' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
   }
 }
