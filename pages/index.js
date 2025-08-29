@@ -41,19 +41,24 @@ export async function getServerSideProps({ query }) {
   }
 }
 
+// Функция для проверки валидности значения (null, undefined, NaN)
+function isValidValue(value) {
+  return value !== null && value !== undefined && !isNaN(value) && isFinite(value);
+}
+
 function interpolateData(data, field) {
   const result = [...data];
   
   for (let i = 1; i < result.length - 1; i++) {
-    if (result[i][field] === null) {
+    if (!isValidValue(result[i][field])) {
       // Найти предыдущую и следующую валидные точки
       let prevIndex = i - 1;
       let nextIndex = i + 1;
       
-      while (prevIndex >= 0 && result[prevIndex][field] === null) {
+      while (prevIndex >= 0 && !isValidValue(result[prevIndex][field])) {
         prevIndex--;
       }
-      while (nextIndex < result.length && result[nextIndex][field] === null) {
+      while (nextIndex < result.length && !isValidValue(result[nextIndex][field])) {
         nextIndex++;
       }
       
@@ -71,7 +76,7 @@ function interpolateData(data, field) {
 }
 
 function calculateMAE(data, forecastField) {
-  const validData = data.filter(d => d.actual !== null && d[forecastField] !== null);
+  const validData = data.filter(d => isValidValue(d.actual) && isValidValue(d[forecastField]));
   if (validData.length === 0) return null;
   
   const errors = validData.map(d => Math.abs(d[forecastField] - d.actual));
@@ -85,7 +90,10 @@ function formatDate(dateStr) {
     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
   ];
   
-  return `${date.getDate()} ${months[date.getMonth()]} ${date.getHours()}:00`;
+  // Конвертируем в часовой пояс Алматы
+  const almatyDate = new Date(date.toLocaleString("en-US", {timeZone: "Asia/Almaty"}));
+  
+  return `${almatyDate.getDate()} ${months[almatyDate.getMonth()]} ${almatyDate.getHours()}:00`;
 }
 
 export default function Home({ chartData, currentData, accuracyData }) {
@@ -129,8 +137,8 @@ export default function Home({ chartData, currentData, accuracyData }) {
     ];
 
     // Добавляем прогнозы только если есть данные (после 12 часов)
-    const hasYandexData = yandexInterpolated.some(d => d.yandex_forecast !== null);
-    const hasMeteoData = meteoInterpolated.some(d => d.meteo_forecast !== null);
+    const hasYandexData = yandexInterpolated.some(d => isValidValue(d.yandex_forecast));
+    const hasMeteoData = meteoInterpolated.some(d => isValidValue(d.meteo_forecast));
 
     if (hasYandexData) {
       traces.push({
@@ -197,18 +205,18 @@ export default function Home({ chartData, currentData, accuracyData }) {
           marginBottom: '20px'
         }}>
           <h3>{formatDate(currentData.target_time)}</h3>
-          <p><strong>Эталон:</strong> {currentData.actual !== null ? `${currentData.actual}°C` : 'N/A'}</p>
+          <p><strong>Эталон:</strong> {isValidValue(currentData.actual) ? `${currentData.actual}°C` : 'N/A'}</p>
           
           <p>
-            <strong>Open-Meteo:</strong> {currentData.meteo_forecast !== null ? `${currentData.meteo_forecast}°C` : 'N/A'}
-            {currentData.meteo_forecast !== null && currentData.actual !== null && (
+            <strong>Open-Meteo:</strong> {isValidValue(currentData.meteo_forecast) ? `${currentData.meteo_forecast}°C` : 'N/A'}
+            {isValidValue(currentData.meteo_forecast) && isValidValue(currentData.actual) && (
               <> | <strong>Ошибка:</strong> {Math.abs(currentData.meteo_forecast - currentData.actual).toFixed(1)}°C</>
             )}
           </p>
           
           <p>
-            <strong>Yandex:</strong> {currentData.yandex_forecast !== null ? `${currentData.yandex_forecast}°C` : 'N/A'}
-            {currentData.yandex_forecast !== null && currentData.actual !== null && (
+            <strong>Yandex:</strong> {isValidValue(currentData.yandex_forecast) ? `${currentData.yandex_forecast}°C` : 'N/A'}
+            {isValidValue(currentData.yandex_forecast) && isValidValue(currentData.actual) && (
               <> | <strong>Ошибка:</strong> {Math.abs(currentData.yandex_forecast - currentData.actual).toFixed(1)}°C</>
             )}
           </p>
