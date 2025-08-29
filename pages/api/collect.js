@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     }
     const actualTemp = Number(narodmonResult.value.sensors[0].value);
     
-    // Yandex Weather [ИСПРАВЛЕНО]
+    // Yandex Weather (без изменений)
     let yandexForecast = null;
     if (yandexResult.status === 'fulfilled') {
       const yandexData = yandexResult.value;
@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       console.error('Ошибка получения прогноза Yandex:', yandexResult.reason);
     }
     
-    // Open-Meteo (эта логика уже была исправлена и остается верной)
+    // Open-Meteo (без изменений)
     let meteoForecast = null;
     if (meteoResult.status === 'fulfilled') {
       const meteoData = meteoResult.value;
@@ -80,21 +80,21 @@ export default async function handler(req, res) {
       console.error('Ошибка получения прогноза Open-Meteo:', meteoResult.reason);
     }
 
-    // 5. Запись в базу данных в UTC (без изменений)
+    // 5. Запись в базу данных в UTC (исправлено - заменяем undefined на null)
     await Promise.all([
         saveTemperatureData(currentHourUTC, { actual: actualTemp }),
         saveTemperatureData(forecastTargetTimeUTC, {
-            yandex_forecast: yandexForecast,
-            meteo_forecast: meteoForecast
+            yandex_forecast: yandexForecast ?? null,
+            meteo_forecast: meteoForecast ?? null
         })
     ]);
 
-    // 6. Отправка ответа (без изменений)
+    // 6. Отправка ответа (исправлено - заменяем undefined на null)
     return res.status(200).json({
       success: true,
       actual: actualTemp,
-      yandex_forecast: yandexForecast,
-      meteo_forecast: meteoForecast,
+      yandex_forecast: yandexForecast ?? null,
+      meteo_forecast: meteoForecast ?? null,
       target_time: forecastTargetTimeUTC.toISOString(),
     });
 
