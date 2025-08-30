@@ -90,8 +90,8 @@ export default function Home({ chartData, currentData, accuracyData }) {
     if (chartData.length === 0) {
       setPlotData([]);
       setLayout({
-        xaxis: { tickformat: '%H:%M' },
-        yaxis: {},
+        xaxis: { tickformat: '%H' },
+        yaxis: { dtick: 2 },
         showlegend: true,
         legend: { y: -0.2, yanchor: 'top', orientation: 'h' },
         responsive: true,
@@ -100,17 +100,17 @@ export default function Home({ chartData, currentData, accuracyData }) {
       return;
     }
 
-    const interpolatedData = interpolateData(chartData, 'actual');
-    const yandexInterpolated = interpolateData(chartData, 'yandex_forecast');
-    const meteoInterpolated = interpolateData(chartData, 'meteo_forecast');
-
-    const times = chartData.map(d =>
-      new Date(d.target_time).toLocaleTimeString('ru-RU', {
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Almaty',
-      })
+    // Сортируем данные по времени
+    const sortedData = [...chartData].sort((a, b) => 
+      new Date(a.target_time).getTime() - new Date(b.target_time).getTime()
     );
+
+    const interpolatedData = interpolateData(sortedData, 'actual');
+    const yandexInterpolated = interpolateData(sortedData, 'yandex_forecast');
+    const meteoInterpolated = interpolateData(sortedData, 'meteo_forecast');
+
+    // Используем полные объекты Date для корректной сортировки
+    const times = sortedData.map(d => new Date(d.target_time));
 
     const traces = [
       {
@@ -119,7 +119,7 @@ export default function Home({ chartData, currentData, accuracyData }) {
         type: 'scatter',
         mode: 'lines+markers',
         name: 'Эталон',
-        line: { color: '#3B82F6' }, // Blue
+        line: { color: '#3B82F6' },
         marker: { size: 6 },
       },
     ];
@@ -134,7 +134,7 @@ export default function Home({ chartData, currentData, accuracyData }) {
         type: 'scatter',
         mode: 'lines+markers',
         name: 'Yandex',
-        line: { color: '#EF4444' }, // Red
+        line: { color: '#EF4444' },
         marker: { size: 6 },
       });
     }
@@ -146,15 +146,21 @@ export default function Home({ chartData, currentData, accuracyData }) {
         type: 'scatter',
         mode: 'lines+markers',
         name: 'Open-Meteo',
-        line: { color: '#10B981' }, // Green
+        line: { color: '#10B981' },
         marker: { size: 6 },
       });
     }
 
     setPlotData(traces);
     setLayout({
-      xaxis: { tickformat: '%H:%M' },
-      yaxis: {},
+      xaxis: { 
+        type: 'date',
+        tickformat: '%H',
+        dtick: 3600000, // Тики каждый час
+      },
+      yaxis: { 
+        dtick: 2 // Шаг 2 градуса для температуры
+      },
       showlegend: true,
       legend: {
         y: -0.2,
