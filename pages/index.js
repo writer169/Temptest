@@ -119,7 +119,7 @@ export default function Home({ chartData, currentData, accuracyData }) {
         type: 'scatter',
         mode: 'lines+markers',
         name: 'Эталон',
-        line: { color: '#3B82F6' },
+        line: { color: '#EF4444' },
         marker: { size: 6 },
       },
     ];
@@ -134,7 +134,7 @@ export default function Home({ chartData, currentData, accuracyData }) {
         type: 'scatter',
         mode: 'lines+markers',
         name: 'Yandex',
-        line: { color: '#EF4444' },
+        line: { color: '#3B82F6' },
         marker: { size: 6 },
       });
     }
