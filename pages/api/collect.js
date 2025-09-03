@@ -15,7 +15,7 @@ function getLocalTimeStringForMeteo(dateUTC) {
 }
 
 export default async function handler(req, res) {
-  // 1. Проверки безопасности (без изменений)
+  // 1. Проверки безопасности
   const { uuid } = req.query;
   if (!uuid || uuid !== process.env.UUID) {
     return res.status(403).json({ error: 'Недопустимый UUID' });
@@ -25,13 +25,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 2. Вычисление времени в UTC (без изменений)
+    // 2. Вычисление времени в UTC
     const now = new Date();
     const currentHourUTC = new Date(now);
     currentHourUTC.setMinutes(0, 0, 0);
     const forecastTargetTimeUTC = new Date(currentHourUTC.getTime() + 12 * 60 * 60 * 1000);
 
-    // 3. Сетевые запросы (без изменений)
+    // 3. Сетевые запросы
     const [narodmonResult, yandexResult, meteoResult] = await Promise.allSettled([
       fetch(`https://narodmon.ru/api?cmd=sensorsValues&sensors=37687&uuid=${process.env.NARODMON_UUID}&api_key=${process.env.NARODMON_KEY}`).then(r => r.json()),
       fetch('https://api.weather.yandex.ru/v2/forecast?lat=43.23&lon=76.86', { headers: { 'X-Yandex-Weather-Key': process.env.YANDEX_KEY } }).then(r => r.json()),
@@ -44,30 +44,37 @@ export default async function handler(req, res) {
     }
     const actualTemp = Number(narodmonResult.value.sensors[0].value);
     
-    // Yandex Weather (без изменений)
+    // Yandex Weather - исправленная версия
     let yandexForecast = null;
     if (yandexResult.status === 'fulfilled') {
       const yandexData = yandexResult.value;
-      const targetDateStr = forecastTargetTimeUTC.toISOString().split('T')[0];
       
-      // Находим прогноз на нужную дату
-      const forecast = yandexData.forecasts?.find(f => f.date === targetDateStr);
-      if (forecast?.hours) {
-        // Получаем нашу целевую метку времени в секундах (как в API Яндекса)
-        const targetTimestamp = Math.floor(forecastTargetTimeUTC.getTime() / 1000);
-        
-        // Ищем в массиве часов объект с точно таким же timestamp
-        const hourData = forecast.hours.find(h => h.hour_ts === targetTimestamp);
-
-        if (hourData?.temp !== undefined) {
-          yandexForecast = Number(hourData.temp);
+      // Получаем нашу целевую метку времени в секундах (как в API Яндекса)
+      const targetTimestamp = Math.floor(forecastTargetTimeUTC.getTime() / 1000);
+      
+      // Ищем во ВСЕХ доступных прогнозах (обычно forecasts[0] и forecasts[1])
+      let hourData = null;
+      
+      if (yandexData.forecasts && Array.isArray(yandexData.forecasts)) {
+        for (const forecast of yandexData.forecasts) {
+          if (forecast?.hours && Array.isArray(forecast.hours)) {
+            // Ищем в массиве часов объект с точно таким же timestamp
+            hourData = forecast.hours.find(h => h.hour_ts === targetTimestamp);
+            if (hourData) {
+              break; // Нашли нужные данные, выходим из цикла
+            }
+          }
         }
+      }
+
+      if (hourData?.temp !== undefined) {
+        yandexForecast = Number(hourData.temp);
       }
     } else {
       console.error('Ошибка получения прогноза Yandex:', yandexResult.reason);
     }
     
-    // Open-Meteo (без изменений)
+    // Open-Meteo
     let meteoForecast = null;
     if (meteoResult.status === 'fulfilled') {
       const meteoData = meteoResult.value;
@@ -80,7 +87,7 @@ export default async function handler(req, res) {
       console.error('Ошибка получения прогноза Open-Meteo:', meteoResult.reason);
     }
 
-    // 5. Запись в базу данных в UTC (исправлено - заменяем undefined на null)
+    // 5. Запись в базу данных в UTC
     await Promise.all([
         saveTemperatureData(currentHourUTC, { actual: actualTemp }),
         saveTemperatureData(forecastTargetTimeUTC, {
@@ -89,7 +96,7 @@ export default async function handler(req, res) {
         })
     ]);
 
-    // 6. Отправка ответа (исправлено - заменяем undefined на null)
+    // 6. Отправка ответа
     return res.status(200).json({
       success: true,
       actual: actualTemp,
